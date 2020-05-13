@@ -407,9 +407,11 @@ if __name__ == "__main__":
 
     process_data.cross_validation_seperate(0)
     hetro_model_ = hetero_model_modify(kg,process_data)
-    nn_model = NN_model(kg,hetro_model_,process_data)
-    nn_model.config_model()
-    nn_model.train()
+    hetro_model_.config_model()
+    hetro_model_.train()
+    #nn_model = NN_model(kg,hetro_model_,process_data)
+    #nn_model.config_model()
+    #nn_model.train()
     #nn_model.test()
         #test_accur.append(nn_model.tp_test)
         #del nn_model
