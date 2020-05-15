@@ -8,8 +8,8 @@ class kg_process_data():
     process heterogeneous kg graph data, divide into train and test data set
     """
     def __init__(self,kg):
-        self.train_percent = 0.7
-        self.test_percent = 0.3
+        self.train_percent = 0.8
+        self.test_percent = 0.2
         self.batch_size = 16
         self.cross_validation_folder = np.int(10)
         self.kg = kg
@@ -49,6 +49,20 @@ class kg_process_data():
 
         self.train_hadm_id = self.split_train_data
         self.test_hadm_id = self.split_test_data
+
+    def filter_patient_diag(self):
+        self.train_hadm_id_filt = []
+        self.test_hadm_id_filt = []
+        for i in self.train_hadm_id:
+            diag = [k for k in self.kg.dic_patient[i]['neighbor_diag'] if k in self.kg.frequent_diag]
+            if len(diag)>0:
+                self.train_hadm_id_filt.append(i)
+        self.train_hadm_id_filt = list(dict.fromkeys(self.train_hadm_id_filt))
+        for i in self.test_hadm_id:
+            diag = [k for k in self.kg.dic_patient[i]['neighbor_diag'] if k in self.kg.frequent_diag]
+            if len(diag)>0:
+                self.test_hadm_id_filt.append(i)
+        #self.test_hadm_id_filt = list(dict.fromkeys(self.test_hadm_id_filt))
 
     def seperate_train_test(self):
         """

@@ -14,16 +14,18 @@ class hetero_model_modify():
     def __init__(self, kg, data_process):
         self.data_process = data_process
         self.train_data = self.data_process.train_patient
-        self.test_data = self.data_process.test_hadm_id
+        self.test_data = self.data_process.test_hadm_id_filt
         self.test_data_lstm = self.data_process.test_patient
         self.length_test = len(self.test_data)
         self.length_train = len(self.train_data)
         self.resolution = 0.005
-        self.threshold_diag = -0.5
+        self.kg = kg
+        self.threshold_diag = 0.5
+        self.threshold_rec = 0.5
         #self.length_train = len(self.train_data)
         self.time_sequence = 1
         if self.time_sequence == 1:
-            self.train_data_sgnn = self.data_process.train_hadm_id
+            self.train_data_sgnn = self.data_process.train_hadm_id_filt
         else:
             self.train_data_sgnn = kg.dic_patient.keys()
 
@@ -33,14 +35,14 @@ class hetero_model_modify():
         self.epoch = 6
         self.latent_dim = 100
         self.latent_dim_lstm = 100
-        self.negative_sample_each_type = 100
+        self.negative_sample_each_type = 50
         self.positive_sample_each_type = 10
         self.positive_sample_size = self.positive_sample_each_type*3
         self.negative_sample_size = self.negative_sample_each_type*2
         self.item_size = len(list(kg.dic_item.keys()))
-        self.diagnosis_size = len(list(kg.dic_diag))
+        #self.diagnosis_size = len(list(kg.dic_diag))
+        self.diagnosis_size = len(kg.frequent_diag)
         self.patient_size = len(list(kg.dic_patient))
-        self.kg = kg
         self.x_origin = None
         self.x_negative = None
 
@@ -370,7 +372,7 @@ class hetero_model_modify():
 
     def assign_value_diag(self, diagid):
         one_sample = np.zeros(self.diagnosis_size)
-        index = self.kg.dic_diag[diagid]['diag_index']
+        index = self.kg.dic_diag[diagid]['index_freq']
         one_sample[index] = 1
 
         return one_sample
@@ -382,7 +384,9 @@ class hetero_model_modify():
     def assign_multi_hot(self, patientid):
         one_sample = np.zeros(self.diagnosis_size)
         for i in self.kg.dic_patient[patientid]['neighbor_diag']:
-            index = self.kg.dic_diag[i]['diag_index']
+            if i not in self.kg.frequent_diag:
+                continue
+            index = self.kg.dic_diag[i]['index_freq']
             one_sample[index] = 1
 
         return one_sample
@@ -406,11 +410,13 @@ class hetero_model_modify():
         """
         get pos set for diag
         """
-        diag_neighbor_nodes = self.kg.dic_patient[center_node_index]['neighbor_diag']
+        self.diag_neighbor_nodes = [i for i in self.kg.dic_patient[center_node_index]['neighbor_diag'] if i in self.kg.frequent_diag]
+        if self.diag_neighbor_nodes == []:
+            return False
         for j in range(self.positive_sample_each_type):
-            index_sample = np.int(np.floor(np.random.uniform(0, len(diag_neighbor_nodes), 1)))
-            self.pos_nodes_diag.append(diag_neighbor_nodes[index_sample])
-            self.diag_pos_index_samples.append(diag_neighbor_nodes[index_sample])
+            index_sample = np.int(np.floor(np.random.uniform(0, len(self.diag_neighbor_nodes), 1)))
+            self.pos_nodes_diag.append(self.diag_neighbor_nodes[index_sample])
+            self.diag_pos_index_samples.append(self.diag_neighbor_nodes[index_sample])
         """
         get pos set for patient
         """
@@ -485,7 +491,8 @@ class hetero_model_modify():
         diag_neighbor_nodes = self.kg.dic_patient[center_node_index]['neighbor_diag']
         whole_diag_nodes = self.kg.dic_diag.keys()
         #gene_neighbor_nodes = gene_neighbor_nodes + self.walk_gene
-        neg_set_diag = [i for i in whole_diag_nodes if i not in diag_neighbor_nodes]
+        neg_set_diag_ = [i for i in whole_diag_nodes if i not in diag_neighbor_nodes]
+        neg_set_diag = [i for i in neg_set_diag_ if i in self.kg.frequent_diag]
         for j in range(self.negative_sample_each_type):
             index_sample = np.int(np.floor(np.random.uniform(0, len(neg_set_diag), 1)))
             self.neg_nodes_diag.append(neg_set_diag[index_sample])
@@ -560,7 +567,7 @@ class hetero_model_modify():
             epoch = self.epoch
         for kk in range(epoch):
             for k in range(iteration_sgnn):
-                self.get_one_batch_sgnn(k + self.batch_size)
+                self.get_one_batch_sgnn(k * self.batch_size)
                 err_ = self.sess.run([self.negative_sum, self.train_step_neg], feed_dict={self.patient: self.patient_sample,
                                                                                           self.diagnosis: self.diag_sample,
                                                                                           self.item: self.item_sample})
@@ -644,7 +651,7 @@ class hetero_model_modify():
     def test(self):
         #self.patient_id_test = patient_id
         patient = np.zeros((self.length_test,1+self.positive_sample_each_type, self.item_size))
-        self.test_logit_diag = np.zeros((self.length_test, len(self.kg.dic_diag.keys())))
+        self.test_logit_diag = np.zeros((self.length_test, len(self.kg.frequent_diag)))
         index_p = 0
         for i in self.test_data:
             patient[index_p,0, :] = self.assign_value_patient(i)
@@ -656,9 +663,9 @@ class hetero_model_modify():
         for i in range(self.length_test):
             self.embed_patient_norm[i,:] = embed_patient[0][i][0] / np.linalg.norm(embed_patient[0][i][0])
         self.embed_item = np.zeros((len(self.kg.dic_item), self.latent_dim))
-        self.embed_diag = np.zeros((len(self.kg.dic_diag), self.latent_dim))
+        self.embed_diag = np.zeros((len(self.kg.frequent_diag), self.latent_dim))
         self.pos_score_item = np.zeros((self.length_test,len(self.kg.dic_item.keys())))
-        self.pos_score_diag = np.zeros((self.length_test,len(self.kg.dic_diag.keys())))
+        self.pos_score_diag = np.zeros((self.length_test,len(self.kg.frequent_diag)))
         #for j in range(self.length_test):
         for i in self.kg.dic_item.keys():
             index = self.kg.dic_item[i]['item_index']
@@ -672,8 +679,8 @@ class hetero_model_modify():
         self.pos_score_item = np.matmul(self.embed_patient_norm,self.embed_item.T)
 
         #for j in range(self.length_test):
-        for i in self.kg.dic_diag.keys():
-            index = self.kg.dic_diag[i]['diag_index']
+        for i in self.kg.frequent_diag:
+            index = self.kg.dic_diag[i]['index_freq']
             single_diag = np.zeros((1, self.positive_sample_each_type+self.negative_sample_each_type,self.diagnosis_size))
             single_diag[0,0, :] = self.assign_value_diag(i)
             embed_single_diag = self.sess.run([self.Dense_diag], feed_dict={self.diagnosis: single_diag})
@@ -728,37 +735,42 @@ class hetero_model_modify():
 
 
         self.tp_rate_total = []
+        self.precision = []
         self.fp_rate_total = []
+        self.tp_total = []
+        self.fp_total = []
+        self.f1_total = []
         self.tp_rate_roc = []
         self.fp_rate_roc = []
         self.correct_rate_diag = np.zeros(self.length_test)
-        threshold = 0.0
-        iter = 0
-        while(threshold<1.01):
-            print(iter)
-            for k in range(self.length_test):
-                #patient_id = self.test_data[i]
-                detect_index_diag = np.where(self.pos_score_diag[k, :] > threshold)
-                detect_index_diag_neg = np.where(self.pos_score_diag[k,:] < threshold)
-                actual_logic_diag = self.test_logit_diag[k,:]
-                actual = np.where(actual_logic_diag>0.1)
-                actual_neg = np.where(actual_logic_diag < 0.1)
-                correct_detect = len([i for i in detect_index_diag[0] if i in actual[0]])
-                uncorrect_detect = len([i for i in detect_index_diag[0] if i in actual_neg[0]])
-                tp_rate = float(correct_detect) / len(actual[0])
-                fp_rate = float(uncorrect_detect) / len(actual_neg[0])
-                self.tp_rate_total.append(tp_rate)
-                self.fp_rate_total.append(fp_rate)
+        #threshold = 0.0
+        for k in range(self.length_test):
+            #patient_id = self.test_data[i]
+            detect_index_diag = np.where(self.pos_score_diag[k, :] > self.threshold_diag)
+            actual_logic_diag = self.test_logit_diag[k,:]
+            actual = np.where(actual_logic_diag>0.1)
+            actual_neg = np.where(actual_logic_diag < 0.1)
+            tp = float(len([i for i in detect_index_diag[0] if i in actual[0]]))
+            fp = float(len([i for i in detect_index_diag[0] if i in actual_neg[0]]))
+            if tp == 0:
+                f1 = 0
+                self.precision.append(0)
+            else:
+                tp_rate = tp / len(actual[0])
+                fp_rate = fp / len(actual_neg[0])
+                precision = tp/(tp+fp)
+                recall = tp/len(actual[0])
+                f1 = 2*(precision*recall)/(precision+recall)
+                self.precision.append(precision)
+            self.f1_total.append(f1)
+            self.tp_rate_total.append(tp_rate)
+            self.fp_rate_total.append(fp_rate)
+            self.tp_total.append(tp)
+            self.fp_total.append(fp)
 
-            self.tp_test = np.mean(self.tp_rate_total)
-            self.fp_test = np.mean(self.fp_rate_total)
-            self.tp_rate_roc.append(self.tp_test)
-            self.fp_rate_roc.append(self.fp_test)
-
-            threshold += self.resolution
-            iter += 1
-            self.tp_rate_total = []
-            self.fp_rate_total = []
+        self.tp_test = np.mean(self.tp_rate_total)
+        self.fp_test = np.mean(self.fp_rate_total)
+        self.f1 = np.mean(self.f1_total)
 
     def diag_accur(self):
         self.diag_f1_score = np.zeros(len(self.kg.dic_diag.keys()))
@@ -810,32 +822,59 @@ class hetero_model_modify():
     get the ranked item, diag for one patient
     """
 
-    def recommandation(self):
-        length_diag = len(np.where(np.array(self.seq_diag) > 0.9)[0])
+    def recommandation(self,patient_id):
+        patient = np.zeros((1, 1 + self.positive_sample_each_type, self.item_size))
+        patient[0, 0, :] = self.assign_value_patient(patient_id)
+        embed_patient = self.sess.run([self.Dense_patient], feed_dict={self.patient: patient})
+        self.embed_patient_norm = np.zeros((1, self.latent_dim))
+        self.embed_patient_norm[0, :] = embed_patient[0][0][0] / np.linalg.norm(embed_patient[0][0][0])
+        self.embed_item = np.zeros((len(self.kg.dic_item), self.latent_dim))
+        self.embed_diag = np.zeros((len(self.kg.frequent_diag), self.latent_dim))
+        self.pos_score_item = np.zeros((1, len(self.kg.dic_item.keys())))
+        self.pos_score_diag = np.zeros((1, len(self.kg.frequent_diag)))
+        # for j in range(self.length_test):
+        for i in self.kg.dic_item.keys():
+            index = self.kg.dic_item[i]['item_index']
+            single_item = np.zeros((1, self.positive_sample_each_type + self.negative_sample_each_type, self.item_size))
+            single_item[0, 0, :] = self.assign_value_item(i)
+            embed_single_item = self.sess.run([self.Dense_item], feed_dict={self.item: single_item})
+            embed_item_single = embed_single_item[0][0][0] / np.linalg.norm(embed_single_item[0][0][0])
+            self.embed_item[index, :] = embed_item_single
+            # self.pos_score_item[j,index] = np.sum(np.multiply(embed_patient_norm[j,:], embed_item_single))
+
+        self.pos_score_item = np.matmul(self.embed_patient_norm, self.embed_item.T)
+
+        # for j in range(self.length_test):
+        for i in self.kg.frequent_diag:
+            index = self.kg.dic_diag[i]['index_freq']
+            single_diag = np.zeros(
+                (1, self.positive_sample_each_type + self.negative_sample_each_type, self.diagnosis_size))
+            single_diag[0, 0, :] = self.assign_value_diag(i)
+            embed_single_diag = self.sess.run([self.Dense_diag], feed_dict={self.diagnosis: single_diag})
+            embed_diag_single = embed_single_diag[0][0][0] / np.linalg.norm(embed_single_diag[0][0][0])
+            self.embed_diag[index, :] = embed_diag_single
+
+        self.pos_score_diag = np.matmul(self.embed_patient_norm, self.embed_diag.T)
+
+        self.seq_diag = sorted(self.pos_score_diag[0])
+        self.seq_item = sorted(self.pos_score_item[0])
+        self.seq_diag.reverse()
+        self.seq_item.reverse()
+
+        self.index_diag = [list(self.pos_score_diag[0]).index(v) for v in self.seq_diag]
+        self.index_item = [list(self.pos_score_item[0]).index(v) for v in self.seq_item]
+
+        length_diag = len(np.where(np.array(self.seq_diag) > self.threshold_rec)[0])
         index_pick_diag = self.index_diag[0:length_diag]
         self.ICD = []
-        for i in self.kg.dic_diag.keys():
-            if self.kg.dic_diag[i]['diag_index'] in index_pick_diag:
+        for i in self.kg.frequent_diag:
+            if self.kg.dic_diag[i]['index_freq'] in index_pick_diag:
                 self.ICD.append(i)
-        length_item = len(np.where(np.array(self.seq_item) > 0.5)[0])
-        self.item_test = []
-        index_pick_item = self.index_item[0:length_item]
-        for i in self.kg.dic_item.keys():
-            if self.kg.dic_item[i]['item_index'] in index_pick_item:
-                self.item_test.append(i)
 
         self.diagnosis_recom = []
-        self.item_test_recom = []
         for i in range(len(self.ICD)):
             ICD_diag = self.ICD[i]
             if ICD_diag in self.kg.diag_d_ar[:, 1]:
                 index_ICD_diag = np.where(self.kg.diag_d_ar[:, 1] == ICD_diag)[0][0]
                 diagnosis = self.kg.diag_d_ar[index_ICD_diag][3]
                 self.diagnosis_recom.append([ICD_diag, diagnosis])
-        for i in range(len(self.item_test)):
-            item_id = self.item_test[i]
-            index_item_id = np.where(self.kg.d_item_ar[:, 1] == item_id)[0][0]
-            item_test_name = self.kg.d_item_ar[index_item_id][2]
-            if item_id in self.kg.dic_patient[self.patient_id_test]['itemid'].keys():
-                item_test_value = np.mean(self.kg.dic_patient[self.patient_id_test]['itemid'][item_id])
-                self.item_test_recom.append([item_id, item_test_name, item_test_value])

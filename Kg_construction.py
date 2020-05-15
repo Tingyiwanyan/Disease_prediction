@@ -31,6 +31,7 @@ class Kg_construct_ehr():
         self.read_diagnosis_d()
         self.read_prescription()
         self.read_ditem()
+        self.threshold_freq = 50
         #self.read_proc_icd()
 
     def read_diagnosis(self):
@@ -254,169 +255,38 @@ class Kg_construct_ehr():
             """
             self.g.add_edge(patient_id, itemid, type='')
 
-
+    def diag_freq(self):
+        self.frequent_diag = []
+        index_freq = 0
+        for i in self.dic_diag.keys():
+            num_patient = len(self.dic_diag[i]['neighbor_patient'])
+            if num_patient > self.threshold_freq:
+                self.dic_diag[i]['index_freq'] = index_freq
+                self.frequent_diag.append(i)
+                index_freq += 1
 
 if __name__ == "__main__":
     kg = Kg_construct_ehr()
     kg.create_kg_dic()
+    kg.diag_freq()
     process_data = kg_process_data(kg)
     test_accur = []
     #process_data.seperate_train_test()
     print("finished loading")
 
     #for i in range(3):
-    """
+
     process_data.cross_validation_seperate(0)
+    process_data.filter_patient_diag()
     hetro_model = hetero_model_modify(kg,process_data)
     #LSTM_model = LSTM_model(kg,hetro_model,process_data)
     hetro_model.config_model()
     print("in get train")
     hetro_model.get_train_graph()
     hetro_model.train()
-    hetro_model.test()
-
-    embed_patient = hetro_model.embed_patient_norm
-    embed_diag = hetro_model.embed_diag
-    embed_item = hetro_model.embed_item
-    embed_total = np.concatenate((embed_diag,embed_patient,embed_item),axis=0)
-    embed_total_2d = TSNE(n_components=2).fit_transform(embed_total)
-    label = np.zeros(4510)
-    label[0:2922] = 0
-    label[2922:2922+1141] = 18
-    label[2922+1141:] = 19
-    for i in kg.dic_diag.keys():
-        index_class = kg.dic_diag[i]['icd']
-        index = kg.dic_diag[i]['diag_index']
-        label[index] = index_class
-    for i in range(4510):
-        if label[i] == 0:
-            color_ = "blue"
-            makersize_ = 4
-        if label[i] == 18:
-            color_ = "red"
-            makersize_ = 5
-        if label[i] == 19:
-            color_ = "green"
-            makersize_ = 6
-        plt.plot(embed_total_2d[i][0],embed_total_2d[i][1],'.',color=color_,markersize=makersize_)
+    #hetro_model.test()
 
 
-    for i in kg.dic_patient_addmission.keys():
-        patient_dob = np.float(patient_info_ar[np.where(patient_info_ar[:, 1] == i)[0][0], 3].split(' ')[0].split('-')[0])
-        admit_time = kg.dic_patient_addmission[i][kg.dic_patient_addmission[i]['time_series'][0]]['date'][0]
-        age = admit_time - patient_dob
-        kg.dic_patient_addmission[i]['age'] = age
-
-    for i in kg.dic_patient.keys():
-        for j in kg.dic_patient_addmission.keys():
-            if i in kg.dic_patient_addmission[j]['time_series']:
-                kg.dic_patient[i]['age'] = kg.dic_patient_addmission[j]['age']
-
-
-    patient_age = np.zeros(len(process_data.test_hadm_id))
-    index_patient = 0
-    for i in process_data.test_hadm_id:
-        #print(index_patient)
-        age_patient = kg.dic_patient[i]['age']
-        patient_age[index_patient] = age_patient
-        index_patient += 1
-    """
-
-    """
-    if label[i] == 1:
-        color_ = "orange"
-    if label[i] == 2:
-        color_ = "purple"
-    if label[i] == 3:
-        color_ = "brown"
-    if label[i] == 4:
-        color_ = "pink"
-    if label[i] == 5:
-        color_ = "gray"
-    if label[i] == 6:
-        color_ = "olive"
-    if label[i] == 7:
-        color_ = "cyan"
-    if label[i] == 8:
-        color_ = "black"
-    if label[i] == 9:
-        color_ = "darkorange"
-    if label[i] == 10:
-        color_ = "burlywood"
-    if label[i] == 11:
-        color_ = "indianred"
-    if label[i] == 12:
-        color_ = "tan"
-    if label[i] == 13:
-        color_ = "darkgoldenrod"
-    if label[i] == 14:
-        color_ = "gold"
-    if label[i] == 15:
-        color_ = "khaki"
-    if label[i] == 16:
-        color_ = "darkkhaki"
-    if label[i] == 17:
-        color_ = "yellow"
-    """
-
-
-
-
-        #single_test_accur = np.mean(hetro_model.tp_test)
-        #test_accur.append(hetro_model.tp_test)
-        #del hetro_model
-    """
-    file = open("/home/tingyi/mfgcn/src/bl_100_sigmoid_fp_73.txt")
-    for line in file:
-        fp_rate = line.rstrip('\n')
-    fp_rate = fp_rate.split(',')
-    fp_rate = [i.replace('[','') for i in fp_rate]
-    fp_rate = [i.replace(']','') for i in fp_rate]
-    fp_rate = [np.float(i) for i in fp_rate]
-
-    file = open("/home/tingyi/mfgcn/src/bl_100_sigmoid_tp_73.txt")
-    for line in file:
-        tp_rate = line.rstrip('\n')
-    tp_rate = tp_rate.split(',')
-    tp_rate = [i.replace('[','') for i in tp_rate]
-    tp_rate = [i.replace(']','') for i in tp_rate]
-    tp_rate = [np.float(i) for i in tp_rate]
-    """
-
-
-
-
-
-
-
-    """
-    test_accur = []
-    for i in range(process_data.cross_validation_folder):
-        process_data.cross_validation_seperate(i)
-        hetro_model = hetero_model_modify(kg, process_data)
-        LSTM_model_ = LSTM_model(kg,hetro_model,process_data)
-        LSTM_model_.config_model()
-        LSTM_model_.train()
-        LSTM_model_.test()
-        test_accur.append(LSTM_model_.f1_test)
-        del LSTM_model_
-    """
-
-    #test_accur = []
-    #for i in range(process_data.cross_validation_folder):
-
-    process_data.cross_validation_seperate(0)
-    hetro_model_ = hetero_model_modify(kg,process_data)
-    hetro_model_.config_model()
-    hetro_model_.train()
-    #nn_model = NN_model(kg,hetro_model_,process_data)
-    #nn_model.config_model()
-    #nn_model.train()
-    #nn_model.test()
-        #test_accur.append(nn_model.tp_test)
-        #del nn_model
-
-    #for i in range(2920):
 
 
 
